@@ -26,6 +26,64 @@ pub fn parse(source_token_details: &[TokenDetail]) -> Result<Node, Error> {
     Ok(Node::Program(program))
 }
 
+// parsing steps:
+// 1. parse_program
+// 2. |- parse_statement
+// 3.    |- parse_function_declaration
+//       |- parse_empty_function_declaration
+//       |- parse_pattern_function_declaration
+//       |- parse_use_statement
+//       |- parse_const_statement
+//       |- parse_struct
+//       |- parse_union
+//       |- parse_trait_declaration
+//       |- parse_impl_statement
+//       |- parse_alias_statement
+//       |- parse_expression_statement
+//          |- parse_expression
+//             |- parse_do_expression
+//             |- parse_join_expression
+//             |- parse_let_expression
+//             |- parse_if_expression
+//             |- parse_for_expression
+//             |- parse_next_expression
+//             |- parse_each_expression
+//             |- parse_branch_expression
+//             |- parse_match_expression
+//                |- parse_pipe_expression (|) 二元开始
+//                   |- parse_logic_or_expression (||)
+//                      |- parse_logic_and_expression (&&)
+//                         |
+// /-----------------------/
+// |- parse_equality_expression (==, !=)
+//    |- parse_relational_expression (>, >=, <, <=)
+//       |- parse_named_operator_expression (:name:)
+//          |- parse_concat_expression (++)
+//             |- parse_additive_expression (+. -)
+//                |- parse_multiplicative_expression (*, /)
+//                   |- parse_optional_or_expression (??)
+//                      |
+// /--------------------/
+// |- parse_combine_expression (&)
+//    |- parse_cast_expression (^) 一元开始
+//       |- parse_negative_expression (-)
+//          |- parse_unwrap_expression (?)
+//             |- parse_simple_expression (简单表达式)
+//                |- parse_function_call_expression
+//                   |- parse_member_or_slice_expression, continue_parse_arguments
+//                      |- parse_constructor_expression, continue_parse_index_or_slice,
+//                         |
+// /-----------------------/
+// |- parse_primary_expression
+//    |- parse_anonymous_function
+//    |- parse_tuple_or_parenthesized
+//    |- parse_list
+//    |- parse_map
+//    |- parse_prefix_identifier
+//    |- parse_identifier
+//    |- parse_sign_expression
+//    |- parse_literal
+//
 // Program
 //  : StatementList
 //  ;
@@ -568,7 +626,7 @@ fn parse_let_expression(
     token_details = skip_new_lines(token_details);
 
     // 解析 `左手边的数据类型` 或者 `左手边值`
-    let (maybe_lhs, post_maybe_lhs) = parse_mono_expression(token_details)?;
+    let (maybe_lhs, post_maybe_lhs) = parse_simple_expression(token_details)?;
 
     let (data_type, lhs) = if is_token(&Token::Assign, post_maybe_lhs) {
         // 当前表达式没有数据类型，只有 `左手边值`（即 `模式表达式`）
@@ -723,7 +781,7 @@ fn parse_for_expression(
     token_details = skip_new_lines(token_details);
 
     // 解析 `左手边的数据类型` 或者 `左手边值`
-    let (maybe_lhs, post_maybe_lhs) = parse_mono_expression(token_details)?;
+    let (maybe_lhs, post_maybe_lhs) = parse_simple_expression(token_details)?;
 
     let (data_type, lhs) = if is_token(&Token::Assign, post_maybe_lhs) {
         // 当前表达式没有数据类型，只有 `左手边值`（即 `模式表达式`）
@@ -835,7 +893,7 @@ fn parse_each_expression(
     token_details = skip_new_lines(token_details);
 
     // 解析 `变量表达式`
-    let (variable, post_variable) = parse_mono_expression(token_details)?;
+    let (variable, post_variable) = parse_simple_expression(token_details)?;
 
     if !is_valid_left_hand_side(&variable) {
         return Err(Error::ParserError(
@@ -1448,7 +1506,7 @@ fn continue_parse_match_case(
             }
             _ => {
                 // 解析 `一般模式表达式`
-                let (lhs, post_lhs) = parse_mono_expression(token_details)?;
+                let (lhs, post_lhs) = parse_simple_expression(token_details)?;
 
                 if !is_valid_left_hand_side(&lhs) {
                     return Err(Error::ParserError("invalid pattern expression".to_string()));
@@ -2054,6 +2112,9 @@ fn parse_optional_or_expression(
     source_token_details: &[TokenDetail],
 ) -> Result<(Expression, &[TokenDetail]), Error> {
     // left ?? right
+    //
+    // let a = some_func()??.next_func()??.some_field
+
     parse_binary_expression(
         &vec![Token::OptionalOr],
         parse_optional_and_expression,
@@ -2131,7 +2192,7 @@ fn parse_unwrap_expression(
     source_token_details: &[TokenDetail],
 ) -> Result<(Expression, &[TokenDetail]), Error> {
     // 一元运算表达式 object?
-    let (left, post_expression) = parse_mono_expression(source_token_details)?;
+    let (left, post_expression) = parse_simple_expression(source_token_details)?;
 
     if is_token(&Token::Unwrap, post_expression) {
         let post_consume_token_operator = consume_token(&Token::Unwrap, post_expression)?;
@@ -2149,7 +2210,7 @@ fn parse_unwrap_expression(
     }
 }
 
-fn parse_mono_expression(
+fn parse_simple_expression(
     source_token_details: &[TokenDetail],
 ) -> Result<(Expression, &[TokenDetail]), Error> {
     // 解析 `单一表达式`
@@ -2169,7 +2230,7 @@ fn parse_function_call_expression(
     // - 允许连续调用。
     //
     // foo(...)          // callee 是一个标识符
-    // foo.bar(...)      // callee 是一个属性值
+    // foo.bar(...)      // callee 是一个关联函数
     // foo[0](...)       // callee 是一个索引值
     // (fn x = x+1)(...) // callee 是一个匿名函数
     // foo(...)(...)     // 连续调用

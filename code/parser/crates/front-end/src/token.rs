@@ -33,7 +33,7 @@ pub enum Token {
     TemplateString(String), // `foo`
     HashString(String),     // #foo
     Regexp(String),   // ~/foo/
-    Attribute(String),      // #[test]
+    Attribute(String),      // #[test] annotation
 
     // 符号
     //
